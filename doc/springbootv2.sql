@@ -1162,3 +1162,25 @@ INSERT INTO `t_test` VALUES (457067196175224832, 'guest', 1, '3', '2021-01-02 16
 INSERT INTO `t_test` VALUES (457067220279889920, 'helloword', 1, '3', '2021-01-03 16:00:00', NULL, NULL, NULL, NULL, NULL);
 
 SET FOREIGN_KEY_CHECKS = 1;
+
+-- ----------------------------
+-- 五月处务会新规：到期提醒「系统自己找、自己发」
+-- 进出的门唯「周期执行」一处：v2Task.expireRemindCycle()，整套执行压给服务层。
+-- 每刻钟唤起一次；窗外（非08:30-17:30）服务层自行留轮，不发不写。
+-- 禁并发(concurrent=1)：上一轮没完，下一轮不叠跑。
+-- ----------------------------
+INSERT IGNORE INTO `t_sys_quartz_job`
+(`id`, `job_name`, `job_group`, `invoke_target`, `cron_expression`, `misfire_policy`, `concurrent`, `status`, `create_by`, `create_time`, `update_by`, `update_time`, `remark`)
+VALUES (910001, '到期提醒周期执行', 'MGIS', 'v2Task.expireRemindCycle()', '0 0/15 * * * ?', '2', '1', 0, 'seed', NOW(), NULL, NULL, '证件资质到期提醒，系统自己找自己发；看板见 /mgisDutyTask/view');
+
+-- 看板菜单（只读，不挂任何立单/改单/手工触发按钮）
+INSERT IGNORE INTO `t_sys_permission`
+(`id`, `name`, `descripion`, `url`, `is_blank`, `pid`, `perms`, `type`, `icon`, `order_num`, `visible`, `create_by`, `create_time`, `update_by`, `update_time`, `remark`)
+VALUES (910011, '到期提醒看板', '证件资质到期提醒周期执行看板', '/mgisDutyTask/view', 0, 592059865673760768, 'mgisDutyTask:view', 1, 'fa fa-bell-o', 20, 0, 'seed', NOW(), NULL, NULL, '只看上一轮周期执行回传的局面'),
+       (910012, '本轮局面数据', '本轮局面数据', '/mgisDutyTask/snapshot', 0, 910011, 'mgisDutyTask:snapshot', 2, NULL, 1, 0, 'seed', NOW(), NULL, NULL, '看板取数接口');
+
+-- 授予管理员角色（488243256161730560）
+INSERT IGNORE INTO `t_sys_permission_role`
+(`id`, `role_id`, `permission_id`, `create_by`, `create_time`, `update_by`, `update_time`, `remark`)
+VALUES (910021, 488243256161730560, 910011, 'seed', NOW(), NULL, NULL, NULL),
+       (910022, 488243256161730560, 910012, 'seed', NOW(), NULL, NULL, NULL);

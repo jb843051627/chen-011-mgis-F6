@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <th:block th:include="include :: header('到期提醒周期看板')"/>
+    <style>
+        .duty-board { --c-sent: #1baf7a; --c-wait: #2a78d6; --c-susp: #eb6834; }
+        .duty-tile .num { font-size: 28px; font-weight: 600; color: #28333E; line-height: 1.4; }
+        .duty-tile .sub { color: #8c8c8c; font-size: 13px; }
+        .duty-banner { padding: 14px 18px; border-radius: 4px; margin-bottom: 10px; font-size: 14px; }
+        .duty-banner.ok    { background: #f0f9eb; color: #529b2e; border: 1px solid #c2e7b0; }
+        .duty-banner.info  { background: #ecf5ff; color: #2a78d6; border: 1px solid #b3d8ff; }
+        .duty-banner.warn  { background: #fdf6ec; color: #b88230; border: 1px solid #faecd8; }
+        .duty-banner.idle  { background: #f4f4f5; color: #909399; border: 1px solid #e9e9eb; }
+        .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+    </style>
+</head>
+<body class="pear-container duty-board">
+
+<div id="banner-box"></div>
+
+<div class="layui-row layui-col-space10">
+    <div class="layui-col-xs6 layui-col-md3">
+        <div class="layui-card duty-tile"><div class="layui-card-body">
+            <div class="num" id="t-runAt">—</div><div class="sub">本轮开跑时刻</div>
+        </div></div>
+    </div>
+    <div class="layui-col-xs6 layui-col-md3">
+        <div class="layui-card duty-tile"><div class="layui-card-body">
+            <div class="num" id="t-sentRound">—</div><div class="sub">本轮发出（条）</div>
+        </div></div>
+    </div>
+    <div class="layui-col-xs6 layui-col-md3">
+        <div class="layui-card duty-tile"><div class="layui-card-body">
+            <div class="num" id="t-waiting">—</div><div class="sub">待发（条，未发队列）</div>
+        </div></div>
+    </div>
+    <div class="layui-col-xs6 layui-col-md3">
+        <div class="layui-card duty-tile"><div class="layui-card-body">
+            <div class="num" id="t-suspended">—</div><div class="sub">累计挂起（条）</div>
+        </div></div>
+    </div>
+</div>
+
+<div class="layui-card">
+    <div class="layui-card-header">
+        本轮各地市局面（已发 / 待发 / 挂起）
+        <span style="float:right;color:#999;font-weight:normal;">
+            <span class="dot" style="background:#1baf7a"></span>已发
+            <span class="dot" style="background:#2a78d6;margin-left:12px"></span>待发
+            <span class="dot" style="background:#eb6834;margin-left:12px"></span>挂起
+        </span>
+    </div>
+    <div class="layui-card-body">
+        <div id="city-chart" style="width:100%;height:380px;"></div>
+        <div id="chart-empty" style="display:none;text-align:center;color:#999;line-height:380px;">本轮无数据</div>
+    </div>
+</div>
+
+<div class="layui-card">
+    <div class="layui-card-header">本轮逐条台账</div>
+    <div class="layui-card-body">
+        <table id="item-table" lay-filter="item-table"></table>
+    </div>
+</div>
+
+<th:block th:include="include :: footer"/>
+<script>
+    layui.use(['table', 'echarts', 'jquery'], function () {
+        let table = layui.table;
+        let echarts = layui.echarts;
+        let $ = layui.jquery;
+
+        let COLOR_SENT = '#1baf7a', COLOR_WAIT = '#2a78d6', COLOR_SUSP = '#eb6834';
+        let chart = echarts.init(document.getElementById('city-chart'));
+
+        function banner(cls, html) {
+            $('#banner-box').html('<div class="duty-banner ' + cls + '">' + html + '</div>');
+        }
+
+        function renderChart(snap) {
+            let cities = snap.cities || [];
+            if (!cities.length) {
+                document.getElementById('city-chart').style.display = 'none';
+                $('#chart-empty').show();
+                return;
+            }
+            document.getElementById('city-chart').style.display = '';
+            $('#chart-empty').hide();
+
+            // 柱段之间留 2px 底色缝；柱顶标总数——哪个市压得多一眼看得见
+            let surface = '#ffffff';
+            let option = {
+                tooltip: {
+                    trigger: 'axis',
+                    axisPointer: { type: 'shadow' },
+                    textStyle: { color: '#333' }
+                },
+                grid: { left: 48, right: 16, top: 28, bottom: 40 },
+                xAxis: {
+                    type: 'category',
+                    data: cities.map(function (c) { return c.cityName || '未归口'; }),
+                    axisLine: { lineStyle: { color: '#bbb' } },
+                    axisTick: { show: false },
+                    axisLabel: { color: '#555', interval: 0 }
+                },
+                yAxis: {
+                    type: 'value',
+                    minInterval: 1,
+                    splitLine: { lineStyle: { type: 'dashed', color: '#e5e5e5' } },
+                    axisLabel: { color: '#888' }
+                },
+                series: [
+                    {
+                        name: '已发', type: 'bar', stack: 'total', barWidth: 30, barGap: '-100%',
+                        itemStyle: { color: COLOR_SENT, borderColor: surface, borderWidth: 2, borderRadius: [0, 0, 0, 0] },
+                        label: { show: true, position: 'inside', color: '#fff', fontSize: 12 },
+                        data: cities.map(function (c) { return c.sent; })
+                    },
+                    {
+                        name: '待发', type: 'bar', stack: 'total',
+                        itemStyle: { color: COLOR_WAIT, borderColor: surface, borderWidth: 2 },
+                        label: { show: true, position: 'inside', color: '#fff', fontSize: 12 },
+                        data: cities.map(function (c) { return c.waiting; })
+                    },
+                    {
+                        name: '挂起', type: 'bar', stack: 'total',
+                        itemStyle: { color: COLOR_SUSP, borderColor: surface, borderWidth: 2, borderRadius: [4, 4, 0, 0] },
+                        label: { show: true, position: 'inside', color: '#fff', fontSize: 12 },
+                        data: cities.map(function (c) { return c.suspended; })
+                    },
+                    {
+                        // 透明标签柱：只负责把每市总数顶在柱头上，不参与图例/提示
+                        name: '_total', type: 'bar', barWidth: 30, silent: true,
+                        itemStyle: { color: 'rgba(0,0,0,0)' },
+                        tooltip: { show: false },
+                        label: { show: true, position: 'top', color: '#333', fontSize: 12, fontWeight: 'bold' },
+                        data: cities.map(function (c) { return c.sent + c.waiting + c.suspended; })
+                    }
+                ]
+            };
+            chart.setOption(option, true);
+        }
+
+        function renderTable(snap) {
+            table.render({
+                elem: '#item-table',
+                data: snap.items || [],
+                page: { limit: 10, limits: [10, 20, 50] },
+                skin: 'line',
+                cols: [[
+                    { title: '提醒单号', field: 'itemNo', align: 'left', width: 160 },
+                    { title: '地市', field: 'cityName', align: 'center', width: 100, templet: function (d) { return d.cityName || '未归口'; } },
+                    { title: '归口联络员', field: 'liaison', align: 'center', width: 110, templet: function (d) { return d.liaison || '<span style="color:#c04848">（空缺）</span>'; } },
+                    { title: '日终截止', field: 'dueAt', align: 'center', width: 170 },
+                    { title: '提前(日)', field: 'leadDays', align: 'center', width: 90 },
+                    { title: '还剩(日)', field: 'daysLeft', align: 'center', width: 90 },
+                    { title: '情形', field: 'status', align: 'center', width: 90, templet: function (d) {
+                        if (d.status === 1) return '<span class="layui-badge layui-bg-green">已发</span>';
+                        if (d.status === 2) return '<span class="layui-badge" style="background:#eb6834">挂起</span>';
+                        return '<span class="layui-badge layui-bg-blue">待发</span>';
+                    }},
+                    { title: '本轮动作', field: 'action', align: 'center', width: 110, templet: function (d) {
+                        var map = { SENT: '本轮发出', SUSPENDED: '转挂起', WAITING: '留到下一轮', ALREADY: '已发未再挑', FAIL: '发送失败留轮' };
+                        return map[d.action] || d.action;
+                    }},
+                    { title: '发出时刻', field: 'sentAt', align: 'center', width: 170 },
+                    { title: '挂起缘故', field: 'suspendReason', align: 'left' }
+                ]]
+            });
+        }
+
+        function render(snap) {
+            if (!snap) {
+                // 从未跑过一轮：空屏提示，不当故障
+                banner('idle', '周期执行尚未跑过。看板只讲服务回传的最近一轮局面，到点后由「v2Task.expireRemindCycle()」自动唤起。');
+                $('#t-runAt').text('—');
+                $('#t-sentRound').text(0);
+                $('#t-waiting').text(0);
+                $('#t-suspended').text(0);
+                renderChart({ cities: [] });
+                renderTable({ items: [] });
+                return;
+            }
+
+            $('#t-runAt').text(snap.runAt || '—');
+            $('#t-sentRound').text(snap.sentThisRound || 0);
+            $('#t-waiting').text(snap.totalWaiting || 0);
+            $('#t-suspended').text(snap.totalSuspended || 0);
+
+            if (snap.concurrentSkip) {
+                banner('warn', '上一轮尚未跑完，本轮已跳过，避免同一件事重复推送。');
+            } else if (snap.idle) {
+                banner('idle', '本轮无事：没有一条到开口的提醒单（没有条子到期的日子常见，非故障）。');
+            } else if (!snap.inWindow) {
+                banner('info', '本轮开跑于对外发送时段之外（只认 <b>08:30—17:30</b>），到期的条子一律不动，留到下一轮。');
+            } else {
+                banner('ok', '本轮发出 <b>' + (snap.sentThisRound || 0) + '</b> 条，新挂起 <b>' + (snap.suspendedThisRound || 0)
+                    + '</b> 条；当日已发 / 待发 / 挂起 = <b>' + snap.totalSent + ' / ' + snap.totalWaiting + ' / ' + snap.totalSuspended + '</b>。');
+            }
+
+            renderChart(snap);
+            renderTable(snap);
+        }
+
+        $.ajax({
+            url: rootPath + '/mgisDutyTask/snapshot',
+            method: 'get',
+            dataType: 'json',
+            success: function (res) {
+                if (res.code === 200) {
+                    render(res.data);
+                } else {
+                    banner('warn', '局面读取失败：' + (res.msg || '未知原因') + '（看板读取异常不影响周期执行本身）。');
+                }
+            },
+            error: function () {
+                banner('warn', '局面读取失败（看板读取异常不影响周期执行本身）。');
+            }
+        });
+
+        window.onresize = function () { chart.resize(); };
+    });
+</script>
+</body>
+</html>
