@@ -23,15 +23,40 @@ CREATE TABLE IF NOT EXISTS t_mgis_duty_task (
   item_no varchar(64) DEFAULT NULL COMMENT '到期提醒单号',
   due_at datetime DEFAULT NULL COMMENT '本项应当到期的日终截止时刻',
   amount decimal(12,2) DEFAULT NULL COMMENT '单条提前提醒的自然日数',
-  status int DEFAULT NULL COMMENT '条目情形 0待提醒 1已提醒 2送不出去',
+  city_code varchar(32) DEFAULT NULL COMMENT '归口地市代号',
+  contact varchar(64) DEFAULT NULL COMMENT '归口联络员（谁收，空则挂起）',
+  status int DEFAULT NULL COMMENT '条目情形 0待提醒 1已提醒 2已挂起',
+  suspend_reason varchar(255) DEFAULT NULL COMMENT '挂起缘故（如归口联络员空缺）',
+  sent_at datetime DEFAULT NULL COMMENT '实际发出时刻（回写成功才落）',
   del_flag int DEFAULT '0' COMMENT '删除标记 0正常 1删除',
   create_by varchar(64) DEFAULT NULL COMMENT '创建者',
   create_time datetime DEFAULT NULL COMMENT '创建时间',
   update_by varchar(64) DEFAULT NULL COMMENT '更新者',
   update_time datetime DEFAULT NULL COMMENT '更新时间',
   remark varchar(500) DEFAULT NULL COMMENT '备注',
-  PRIMARY KEY (id)
+  PRIMARY KEY (id),
+  KEY idx_duty_pick (status, del_flag, due_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='到期提醒派发条目';
+
+-- 每轮「周期执行」落一屏局面：只讲本轮，不替历史轮次背账。
+CREATE TABLE IF NOT EXISTS t_mgis_duty_round (
+  id bigint NOT NULL COMMENT '主键',
+  round_no varchar(64) DEFAULT NULL COMMENT '轮次号（按本轮时刻生成）',
+  run_at datetime DEFAULT NULL COMMENT '本轮执行时刻',
+  city_code varchar(32) DEFAULT NULL COMMENT '地市代号',
+  sent_count int DEFAULT '0' COMMENT '本轮本市已发条数',
+  pending_count int DEFAULT '0' COMMENT '本轮本市待发条数（到点未发/留轮）',
+  suspended_count int DEFAULT '0' COMMENT '本轮本市挂起条数',
+  idle_flag int DEFAULT '0' COMMENT '本轮是否无事 0有动作 1本轮无事',
+  del_flag int DEFAULT '0' COMMENT '删除标记 0正常 1删除',
+  create_by varchar(64) DEFAULT NULL COMMENT '创建者',
+  create_time datetime DEFAULT NULL COMMENT '创建时间',
+  update_by varchar(64) DEFAULT NULL COMMENT '更新者',
+  update_time datetime DEFAULT NULL COMMENT '更新时间',
+  remark varchar(500) DEFAULT NULL COMMENT '备注',
+  PRIMARY KEY (id),
+  KEY idx_round_no (round_no)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='到期提醒本轮局面（按地市）';
 
 CREATE TABLE IF NOT EXISTS t_mgis_qual_line (
   id bigint NOT NULL COMMENT '主键',
@@ -129,4 +154,11 @@ CREATE TABLE IF NOT EXISTS t_mgis_use_bill (
 INSERT IGNORE INTO t_mgis_unit_doc (id, site_no, site_name, site_type, road_name, th1_max, th2_max, th3_max, status, del_flag, create_by, create_time)
 VALUES (0, 'ZZ00', '江南省测绘院第一地理信息工程院基础档案', '事业单位', '江南省—临川市—城东区', 30.00, 120.00, 360.00, 0, 0, 'seed', NOW()),
        (1, 'ZZ01', '旧临川市城乡测绘服务中心基础档案（已注销）', '企业单位', '江南省—临川市—城西区', 30.00, 120.00, 360.00, 1, 0, 'seed', NOW());
+
+-- 进出的门唯「周期执行」一处：每十分钟一轮，窗口/到点/挂起全由服务层裁，
+-- 页面不得预置局面，也不开手工立单改单的口子。0=正常，concurrent=1 禁并发。
+INSERT IGNORE INTO t_sys_quartz_job
+  (id, job_name, job_group, invoke_target, cron_expression, misfire_policy, concurrent, status, create_by, create_time, remark)
+VALUES
+  (930050100000000001, '到期提醒周期执行', 'MGIS', 'dutyCycleTask.run()', '0 0/10 * * * ?', '3', '1', 0, 'seed', NOW(), '到期自动找、自动发；落本轮局面');
 

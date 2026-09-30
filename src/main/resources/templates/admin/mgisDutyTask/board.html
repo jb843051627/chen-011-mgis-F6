@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <th:block th:include="include :: header('到期提醒本轮看板')"/>
+</head>
+<body class="pear-container">
+<div class="layui-card">
+    <div class="layui-card-header">
+        <span>到期提醒 · 本轮看板</span>
+        <span style="margin-left:16px;color:#999;font-weight:normal;font-size:13px;">
+            轮次：<span id="round-no">—</span>　执行时刻：<span id="run-at">—</span>
+        </span>
+    </div>
+    <div class="layui-card-body">
+        <div class="layui-row layui-col-space10">
+            <div class="layui-col-xs6 layui-col-md4">
+                <div class="layui-card"><div class="layui-card-body">
+                    <div style="color:#666;">本轮已发</div>
+                    <div id="total-sent" style="font-size:30px;color:#16baaa;">0</div>
+                </div></div>
+            </div>
+            <div class="layui-col-xs6 layui-col-md4">
+                <div class="layui-card"><div class="layui-card-body">
+                    <div style="color:#666;">本轮待发（留轮/未回写成）</div>
+                    <div id="total-pending" style="font-size:30px;color:#ffb800;">0</div>
+                </div></div>
+            </div>
+            <div class="layui-col-xs6 layui-col-md4">
+                <div class="layui-card"><div class="layui-card-body">
+                    <div style="color:#666;">本轮挂起（归口空缺）</div>
+                    <div id="total-suspended" style="font-size:30px;color:#ff5722;">0</div>
+                </div></div>
+            </div>
+        </div>
+
+        <!-- 无条到期的日子常有的回话，不是故障 -->
+        <div id="idle-tip" class="layui-bg-gray"
+             style="display:none;margin-top:12px;padding:40px;text-align:center;color:#888;font-size:16px;border-radius:4px;">
+            本轮无事
+        </div>
+
+        <div id="board-body" style="display:none;">
+            <div id="city-chart" style="width:100%;height:420px;margin-top:12px;"></div>
+            <table class="layui-table" style="margin-top:12px;">
+                <thead>
+                <tr>
+                    <th>地市</th>
+                    <th>本轮已发</th>
+                    <th>本轮待发</th>
+                    <th>本轮挂起</th>
+                </tr>
+                </thead>
+                <tbody id="city-rows"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<th:block th:include="include :: footer"/>
+<script>
+    layui.use(['jquery', 'echarts', 'layer'], function () {
+        var $ = layui.jquery;
+        var echarts = layui.echarts;
+        var MODULE_PATH = rootPath + "/mgisDutyTask";
+
+        function fmt(v) {
+            return (v === undefined || v === null) ? '—' : v;
+        }
+
+        $.ajax({
+            url: MODULE_PATH + '/board',
+            type: 'get',
+            success: function (res) {
+                var board = res.data || {};
+                $('#round-no').text(fmt(board.roundNo));
+                $('#run-at').text(fmt(board.runAt));
+
+                if (board.idle || !board.cities || board.cities.length === 0) {
+                    $('#idle-tip').show();
+                    $('#board-body').hide();
+                    return;
+                }
+
+                $('#idle-tip').hide();
+                $('#board-body').show();
+                $('#total-sent').text(board.totalSent || 0);
+                $('#total-pending').text(board.totalPending || 0);
+                $('#total-suspended').text(board.totalSuspended || 0);
+
+                var names = board.cities.map(function (c) { return c.cityName || c.cityCode || '（未归口）'; });
+                var sent = board.cities.map(function (c) { return c.sent; });
+                var pending = board.cities.map(function (c) { return c.pending; });
+                var suspended = board.cities.map(function (c) { return c.suspended; });
+
+                var html = '';
+                board.cities.forEach(function (c) {
+                    html += '<tr><td>' + (c.cityName || c.cityCode || '（未归口）') + '</td>'
+                        + '<td>' + c.sent + '</td><td>' + c.pending + '</td><td>' + c.suspended + '</td></tr>';
+                });
+                $('#city-rows').html(html);
+
+                var chart = echarts.init(document.getElementById('city-chart'), 'walden');
+                chart.setOption({
+                    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+                    legend: { data: ['已发', '待发', '挂起'] },
+                    grid: { left: 50, right: 20, top: 40, bottom: 60 },
+                    xAxis: { type: 'category', data: names, axisLabel: { interval: 0, rotate: names.length > 6 ? 30 : 0 } },
+                    yAxis: { type: 'value', minInterval: 1 },
+                    series: [
+                        { name: '已发', type: 'bar', stack: 'total', data: sent, itemStyle: { color: '#16baaa' } },
+                        { name: '待发', type: 'bar', stack: 'total', data: pending, itemStyle: { color: '#ffb800' } },
+                        { name: '挂起', type: 'bar', stack: 'total', data: suspended, itemStyle: { color: '#ff5722' } }
+                    ]
+                });
+                window.onresize = function () { chart.resize(); };
+            },
+            error: function () {
+                layui.layer.msg('本轮局面取数失败', { icon: 2 });
+            }
+        });
+    });
+</script>
+</body>
+</html>
